@@ -8,10 +8,13 @@
 //! [`DecklistClient`](crate::decklist::DecklistClient) drives these over
 //! the network; an app with its own HTTP stack can drive them itself.
 //!
-//! The deck query asks for every field both apps read, so it needs an
-//! instance recent enough to expose `cardCount`,
-//! `commanderColorIdentity`, `finish`, and the printing references on
-//! `deckCards` (the-gathering already requires all but `finish`).
+//! The deck query asks for every field both apps read, so the remote
+//! instance must be ManaVault [`MIN_SERVER_VERSION`] or newer: `finish`,
+//! `cardCount`, and `preferredPrinting` have existed since v0.2.2,
+//! `fallbackPrinting` since v0.11.0, and `commanderColorIdentity` since
+//! v1.3.0, which sets the minimum. An older instance rejects the query
+//! with a "Cannot query field" error, which [`DeckPager::accept`] reports
+//! as [`FetchError::ServerTooOld`]; there is no fallback query.
 
 use std::collections::HashSet;
 use std::time::Duration;
@@ -24,6 +27,20 @@ use crate::decklist::{Decklist, Entry, FetchError, Source};
 
 /// The only path ever requested on a ManaVault origin.
 pub const GRAPHQL_PATH: &str = "/share/graphql";
+
+/// The oldest ManaVault release whose share schema answers [`DECK_QUERY`].
+pub const MIN_SERVER_VERSION: &str = "1.3.0";
+
+/// Fields of [`DECK_QUERY`] that older ManaVault releases lack, newest
+/// first. A GraphQL error naming one means the server predates
+/// [`MIN_SERVER_VERSION`].
+const VERSIONED_DECK_FIELDS: [&str; 5] = [
+    "commanderColorIdentity",
+    "fallbackPrinting",
+    "preferredPrinting",
+    "cardCount",
+    "finish",
+];
 
 /// Name given to an imported want list.
 pub const WANTS_NAME: &str = "Shared wants";
@@ -485,14 +502,19 @@ impl DeckPager {
     ///
     /// A `null` deck is [`FetchError::NotFound`]. A next cursor that is
     /// empty, equal to the current one, or already seen is
-    /// [`FetchError::InvalidPagination`].
+    /// [`FetchError::InvalidPagination`]. A GraphQL error rejecting one of
+    /// the query's newer fields is [`FetchError::ServerTooOld`].
     pub fn accept(
         &mut self,
         response: GraphqlResponse<DeckData>,
         bytes: u64,
     ) -> Result<Step, FetchError> {
         self.budget.record_page(bytes)?;
-        let deck = response.into_data()?.deck.ok_or(FetchError::NotFound)?;
+        let deck = response
+            .into_data()
+            .map_err(classify_deck_error)?
+            .deck
+            .ok_or(FetchError::NotFound)?;
         let connection = deck.deck_cards.clone().ok_or(FetchError::Malformed)?;
         let page: Vec<Entry> = connection
             .edges
@@ -570,6 +592,25 @@ fn list_field(kind: ShareKind) -> &'static str {
         ShareKind::Deck => "deck",
         ShareKind::Wants => "wantsList",
         ShareKind::Binder => "binderList",
+    }
+}
+
+/// Maps a GraphQL error from the deck query: an error naming one of the
+/// fields added after the first share schema means the server predates
+/// [`MIN_SERVER_VERSION`] ([`FetchError::ServerTooOld`]).
+#[must_use]
+pub fn classify_deck_error(error: FetchError) -> FetchError {
+    match error {
+        FetchError::GraphqlErrors(messages)
+            if messages.iter().any(|message| {
+                VERSIONED_DECK_FIELDS
+                    .iter()
+                    .any(|field| message.contains(field))
+            }) =>
+        {
+            FetchError::ServerTooOld
+        }
+        other => other,
     }
 }
 
@@ -872,6 +913,35 @@ mod tests {
         assert_eq!(
             list_request(ShareKind::Wants, "tok").unwrap().query,
             WANTS_QUERY
+        );
+    }
+
+    #[test]
+    fn old_servers_rejecting_the_deck_query_are_reported_as_too_old() {
+        let too_old: GraphqlResponse<DeckData> = serde_json::from_value(serde_json::json!({
+            "errors": [{"message": "Cannot query field \"commanderColorIdentity\" on type \"Deck\"."}]
+        }))
+        .unwrap();
+        let mut pager = DeckPager::new("tok", Limits::default());
+        assert_eq!(pager.accept(too_old, 10), Err(FetchError::ServerTooOld));
+
+        let unrelated: GraphqlResponse<DeckData> = serde_json::from_value(serde_json::json!({
+            "errors": [{"message": "rate limited"}]
+        }))
+        .unwrap();
+        let mut pager = DeckPager::new("tok", Limits::default());
+        assert_eq!(
+            pager.accept(unrelated, 10),
+            Err(FetchError::GraphqlErrors(vec!["rate limited".into()]))
+        );
+        assert_eq!(
+            classify_deck_error(FetchError::Timeout),
+            FetchError::Timeout
+        );
+        assert!(
+            FetchError::ServerTooOld
+                .to_string()
+                .contains(MIN_SERVER_VERSION)
         );
     }
 

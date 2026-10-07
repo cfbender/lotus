@@ -203,6 +203,11 @@ pub enum FetchError {
     /// The remote ManaVault schema has no field for this share kind.
     #[error("that ManaVault instance doesn't support shared {0} lists yet")]
     Unsupported(ShareKind),
+    /// The remote ManaVault predates
+    /// [`manavault::MIN_SERVER_VERSION`](crate::decklist::manavault::MIN_SERVER_VERSION)
+    /// and rejected a field of the deck query.
+    #[error("ManaVault server too old (needs v{}+)", manavault::MIN_SERVER_VERSION)]
+    ServerTooOld,
     /// Pagination did not advance.
     #[error("that ManaVault instance returned invalid list pagination")]
     InvalidPagination,
