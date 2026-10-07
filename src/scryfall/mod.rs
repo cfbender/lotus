@@ -8,7 +8,9 @@ pub mod catalog;
 pub mod client;
 pub mod rulings;
 
-pub use bulk::{BULK_DATA_URL, BulkData, BulkDataList, BulkError, DEFAULT_CARDS_URL, JsonLines};
+pub use bulk::{
+    BULK_DATA_URL, BulkData, BulkDataList, BulkError, DEFAULT_CARDS_URL, JsonLines, is_gzip,
+};
 pub use card::{CardFace, ImageUris, RelatedCard, ScryfallCard, parse_date};
 pub use catalog::{Exclusion, SelectionKey, describes_card, import_policy};
 #[cfg(feature = "http")]

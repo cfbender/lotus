@@ -25,7 +25,9 @@ pub(crate) mod regex;
 pub mod scryfall;
 
 pub use card::{Color, Condition, Finish, Game, Legality, Rarity, Zone, is_basic_land};
-pub use commander::{CommanderPairing, can_be_commander, commander_pairing};
+pub use commander::{
+    CommanderCard, CommanderPairing, can_be_commander, commander_pairing, valid_pair,
+};
 pub use ids::{OracleId, ScryfallId};
 pub use name::{match_key, normalize_name};
 pub use quantity::Quantity;

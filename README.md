@@ -11,10 +11,10 @@ usable by any Rust project that works with Scryfall data or imports decklists.
 | Module | Contents |
 | --- | --- |
 | `card` | `Finish`, `Condition`, `Color`, `Rarity`, `Legality`, `Game`, `Zone`, type-line helpers such as `is_basic_land` (snow basics count). |
-| `ids` | `ScryfallId` and `OracleId` newtypes that only hold well-formed lowercase UUIDs. |
+| `ids` | `ScryfallId` and `OracleId` newtypes so a printing id cannot be passed where an oracle id belongs. |
 | `quantity` | `Quantity`, a positive count. |
 | `name` | `normalize_name` and `match_key` for diacritic- and punctuation-insensitive card lookups. |
-| `commander` | `can_be_commander` and `commander_pairing` (Partner, Partner with, Background, Doctor's companion, Friends forever). |
+| `commander` | `can_be_commander` (CR 903.3, judged by the front face), `commander_pairing` (Partner, Partner with, Background, Doctor's companion, Friends forever), and `valid_pair` for two-commander command zones. |
 | `scryfall` | The Scryfall card model, bulk-data manifest parsing, streaming JSON-lines reader for bulk files, rulings, and the catalog import policy both apps apply. Feature `http` adds `ScryfallClient`. |
 | `decklist` | Pasted link parsing for Moxfield, Archidekt, and ManaVault share links; typed models of each site's JSON mapped to a common `Decklist`; a ManaVault GraphQL pager with page, entry, byte, and time budgets; an SSRF allowlist for user-supplied hosts. Feature `http` adds `DecklistClient`. |
 
@@ -59,9 +59,9 @@ mise run test    # cargo test --all-features
 
 - `unsafe` is forbidden. `unwrap`, `expect`, `panic!`, `todo!`, indexing, and
   `as` casts are denied outside tests. Clippy pedantic is on.
-- Invalid states are unrepresentable: ids are validated on construction,
-  quantities are positive, fixed-vocabulary columns are enums, and every
-  decklist entry has a zone.
+- Invalid states are unrepresentable: quantities are positive,
+  fixed-vocabulary columns are enums, the two kinds of Scryfall id are
+  distinct types, and every decklist entry has a zone.
 - Behavior is ported from the Elixir apps and their tests. Where the two apps
   disagreed or an Elixir implementation had a bug, the crate documents the
   choice at the item that makes it instead of silently copying one side.

@@ -3,6 +3,11 @@
 //! Scryfall uses two different UUIDs for a card: one for its rules text
 //! ([`OracleId`]) and one for each printing ([`ScryfallId`]). Keeping them
 //! as distinct types stops one from being passed where the other belongs.
+//!
+//! The types do not check that the text is a UUID. Both apps' fixtures and
+//! existing databases hold ids such as `"oracle-1"`, and Scryfall is the
+//! only producer of real ids, so the newtypes guard against mixing the two
+//! kinds of id rather than against malformed text.
 
 use std::fmt;
 

@@ -3,9 +3,18 @@
 //! Only the fields the apps use are modeled. Unknown fields are ignored on
 //! decode, so a bulk file with new Scryfall fields still imports. Absent
 //! optional fields decode to `None` or an empty collection.
+//!
+//! Fixed-vocabulary fields (`rarity`, `finishes`, `colors`, `legalities`,
+//! `all_parts`) are decoded leniently: a value this crate does not know is
+//! dropped instead of failing the whole card. The Elixir apps stored those
+//! values as raw strings and never validated them; a Rust port can only
+//! store what its enums represent, so the choice is between skipping one
+//! value and skipping the card, and one new Scryfall vocabulary word must
+//! not make a bulk import lose a card.
 
 use std::collections::BTreeMap;
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use time::Date;
 use time::macros::format_description;
@@ -58,7 +67,11 @@ pub struct CardFace {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oracle_text: Option<String>,
     /// The face's colors.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient_opt_vec",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub colors: Option<Vec<Color>>,
     /// The face's illustration id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -126,13 +139,18 @@ pub struct ScryfallCard {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cmc: Option<f64>,
     /// Colors for single-faced cards.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient_opt_vec",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub colors: Option<Vec<Color>>,
     /// Color identity.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_vec")]
     pub color_identity: Vec<Color>,
-    /// Format legalities.
-    #[serde(default)]
+    /// Format legalities. Formats whose value is not a known [`Legality`]
+    /// are dropped.
+    #[serde(default, deserialize_with = "lenient_map")]
     pub legalities: BTreeMap<String, Legality>,
     /// Whether the card is on the Commander Game Changers list.
     #[serde(default)]
@@ -164,11 +182,15 @@ pub struct ScryfallCard {
     /// Flavor text for single-faced cards.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flavor_text: Option<String>,
-    /// Rarity.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Rarity. An unknown rarity decodes as `None`.
+    #[serde(
+        default,
+        deserialize_with = "lenient_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub rarity: Option<Rarity>,
-    /// Available finishes.
-    #[serde(default)]
+    /// Available finishes, without any this crate does not know.
+    #[serde(default, deserialize_with = "lenient_vec")]
     pub finishes: Vec<Finish>,
     /// Promo types.
     #[serde(default)]
@@ -202,12 +224,55 @@ pub struct ScryfallCard {
     /// `TCGplayer` product id for the etched printing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tcgplayer_etched_id: Option<u64>,
-    /// Related cards (tokens, meld parts, combo pieces).
-    #[serde(default)]
+    /// Related cards (tokens, meld parts, combo pieces). Parts without an
+    /// `id` are dropped, as ManaVault's `card_token_rows/1` skipped them.
+    #[serde(default, deserialize_with = "lenient_vec")]
     pub all_parts: Vec<RelatedCard>,
     /// Faces of a multi-faced card.
     #[serde(default)]
     pub card_faces: Vec<CardFace>,
+}
+
+/// Decodes `T` from an already-parsed JSON value, or `None` when it is not
+/// one this crate represents.
+fn lenient<T: DeserializeOwned>(value: serde_json::Value) -> Option<T> {
+    serde_json::from_value(value).ok()
+}
+
+fn lenient_opt<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    let raw: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    Ok(raw.and_then(lenient))
+}
+
+fn lenient_vec<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    deserializer: D,
+) -> Result<Vec<T>, D::Error> {
+    let raw: Option<Vec<serde_json::Value>> = Option::deserialize(deserializer)?;
+    Ok(raw
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(lenient)
+        .collect())
+}
+
+fn lenient_opt_vec<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    deserializer: D,
+) -> Result<Option<Vec<T>>, D::Error> {
+    let raw: Option<Vec<serde_json::Value>> = Option::deserialize(deserializer)?;
+    Ok(raw.map(|values| values.into_iter().filter_map(lenient).collect()))
+}
+
+fn lenient_map<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    deserializer: D,
+) -> Result<BTreeMap<String, T>, D::Error> {
+    let raw: Option<BTreeMap<String, serde_json::Value>> = Option::deserialize(deserializer)?;
+    Ok(raw
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(key, value)| lenient(value).map(|value| (key, value)))
+        .collect())
 }
 
 fn lenient_date<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Date>, D::Error> {
@@ -400,6 +465,37 @@ mod tests {
 
     fn card(json: &str) -> ScryfallCard {
         serde_json::from_str(json).unwrap()
+    }
+
+    /// A vocabulary word this crate does not know drops that value, not the
+    /// card; known values beside it survive.
+    #[test]
+    fn drops_unknown_vocabulary_instead_of_failing_the_card() {
+        let card = card(
+            r#"{"id":"p1","name":"X","rarity":"glossy","finishes":["nonfoil","glossy","etched"],
+                "colors":["W","Purple"],"color_identity":["Purple","G"],
+                "legalities":{"commander":"legal","future":"pending","vintage":"restricted"},
+                "all_parts":[{"component":"token","name":"No id"},{"id":"t1","component":"token","name":"Soldier"}],
+                "card_faces":[{"name":"Front","colors":["U","Purple"]}]}"#,
+        );
+        assert_eq!(card.rarity, None);
+        assert_eq!(card.finishes, vec![Finish::Nonfoil, Finish::Etched]);
+        assert_eq!(card.colors, Some(vec![Color::W]));
+        assert_eq!(card.color_identity, vec![Color::G]);
+        assert_eq!(
+            card.legalities,
+            BTreeMap::from([
+                ("commander".to_owned(), Legality::Legal),
+                ("vintage".to_owned(), Legality::Restricted),
+            ])
+        );
+        assert_eq!(card.all_parts.len(), 1);
+        assert_eq!(card.all_parts[0].id.as_str(), "t1");
+        assert_eq!(card.card_faces[0].colors, Some(vec![Color::U]));
+
+        let known = super::tests::card(r#"{"id":"p2","name":"Y","rarity":"bonus","colors":null}"#);
+        assert_eq!(known.rarity, Some(Rarity::Bonus));
+        assert_eq!(known.colors, None);
     }
 
     #[test]

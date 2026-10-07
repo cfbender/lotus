@@ -24,8 +24,8 @@ It uses `--locked`, so commit `Cargo.lock` with dependency changes.
   `todo!`, `unimplemented!`, `dbg!`, indexing/slicing, and `as` casts are
   denied outside tests. Do not `allow` them to get code compiling; restructure
   with types, `Option`, `Result`, `get`, `TryFrom`, or checked arithmetic.
-- Make invalid states unrepresentable. Validate at construction (`ScryfallId`,
-  `Quantity`), use enums for fixed vocabularies, and keep `as_str` / `parse` /
+- Make invalid states unrepresentable. Validate at construction (`Quantity`,
+  `Origin`), use enums for fixed vocabularies, and keep `as_str` / `parse` /
   serde / sqlx encodings of an enum identical (a test in `tests/sqlx_types.rs`
   enforces this; extend it for new enums).
 - Every public item has a doc comment (`missing_docs` warns, CI denies

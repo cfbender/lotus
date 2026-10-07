@@ -1,5 +1,5 @@
 //! Commander-format rules derived from a card's type line and Oracle text
-//! (`TheGathering.Catalog.CardData`).
+//! (`Manavault.Catalog.CommanderRules` and `TheGathering.Catalog.CardData`).
 
 use std::fmt;
 use std::sync::LazyLock;
@@ -56,6 +56,19 @@ static BACKGROUND: LazyLock<Regex> = LazyLock::new(|| regex(r"(?i)(?:^|\s|—)Ba
 static EXPLICIT_COMMANDER: LazyLock<Regex> = LazyLock::new(|| regex(r"(?i)can be your commander"));
 static TIME_LORD: LazyLock<Regex> = LazyLock::new(|| regex(r"\bTime Lord\b"));
 static DOCTOR: LazyLock<Regex> = LazyLock::new(|| regex(r"\bDoctor\b"));
+static COMMANDER_TYPE: LazyLock<Regex> =
+    LazyLock::new(|| regex(r"\b(?:Creature|Vehicle|Spacecraft)\b"));
+/// The Partner keyword on its own line, with the restricted label if any
+/// ("Partner—Survivors"). "Partner with <name>" is a different mechanic and
+/// deliberately does not match.
+static PARTNER_LABEL: LazyLock<Regex> =
+    LazyLock::new(|| regex(r"^Partner(?:\s*[—–-]\s*([^(]+?))?\s*(?:\(|$)"));
+static FRIENDS_FOREVER_LINE: LazyLock<Regex> =
+    LazyLock::new(|| regex(r"(?i)^(?:Partner—)?Friends forever(?:$|\s*\()"));
+static DOCTORS_COMPANION_LINE: LazyLock<Regex> =
+    LazyLock::new(|| regex(r"(?i)^Doctor['’]s companion(?:$|\s*\()"));
+static CHOOSE_A_BACKGROUND_LINE: LazyLock<Regex> =
+    LazyLock::new(|| regex(r"(?i)^Choose a Background(?:$|\s*\()"));
 
 /// Oracle keyword lines, optionally followed by reminder text. Current Oracle
 /// wording groups the pairing variants under Partner ("Partner—Friends
@@ -96,13 +109,101 @@ fn is_legendary_creature(types: &str) -> bool {
     types.contains("Legendary") && types.contains("Creature")
 }
 
-/// Whether a card may lead a Commander deck: a legendary creature, or a card
-/// whose text says it can be your commander. Backgrounds are never
-/// commanders even though they are legendary.
+/// The front face of a type line: the part before `//`.
+fn front_face(type_line: &str) -> &str {
+    type_line.split("//").next().unwrap_or(type_line)
+}
+
+/// Whether a card may lead a Commander deck.
+///
+/// Per Comprehensive Rules 903.3 that is a legendary creature, Vehicle, or
+/// Spacecraft card, judged by the front face of a multi-faced card, plus any
+/// card whose text grants "can be your commander" (903.3a), such as
+/// planeswalker commanders. Scryfall exposes no field for this, so the
+/// Oracle text is the source of truth.
+///
+/// This is ManaVault's rule. the-gathering accepted only legendary creatures
+/// and judged the whole type line, so it rejected legendary Vehicles and
+/// accepted a card whose back face is a legendary creature; both are wrong
+/// under 903.3, so the ManaVault rule is used for both apps.
 #[must_use]
 pub fn can_be_commander(type_line: &str, oracle_text: &str) -> bool {
-    !is_background(type_line)
-        && (is_legendary_creature(type_line) || EXPLICIT_COMMANDER.is_match(oracle_text))
+    let front = front_face(type_line);
+    (front.contains("Legendary") && COMMANDER_TYPE.is_match(front))
+        || EXPLICIT_COMMANDER.is_match(oracle_text)
+}
+
+/// What the two-commander check needs from a card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommanderCard<'a> {
+    /// The card name; multi-faced cards use `"Front // Back"`.
+    pub name: &'a str,
+    /// The type line.
+    pub type_line: &'a str,
+    /// The Oracle text, faces joined with newlines.
+    pub oracle_text: &'a str,
+}
+
+impl CommanderCard<'_> {
+    fn lines(&self) -> impl Iterator<Item = &str> {
+        self.oracle_text.lines().map(str::trim)
+    }
+
+    /// The Partner keyword's restricted label, lowercased; an empty string
+    /// for plain Partner; `None` without the keyword.
+    fn partner_label(&self) -> Option<String> {
+        self.lines().find_map(|line| {
+            let captures = PARTNER_LABEL.captures(line)?;
+            Some(
+                captures
+                    .get(1)
+                    .map(|label| label.as_str().trim().to_lowercase())
+                    .unwrap_or_default(),
+            )
+        })
+    }
+
+    fn partner_with(&self, other: &Self) -> bool {
+        let other_name = regex::escape(other.base_name());
+        let Ok(pattern) = Regex::new(&format!(r"(?i)^Partner with {other_name}(?:$|\s*\()")) else {
+            return false;
+        };
+        self.lines().any(|line| pattern.is_match(line))
+    }
+
+    fn base_name(&self) -> &str {
+        self.name.split(" // ").next().unwrap_or(self.name).trim()
+    }
+
+    fn has_line(&self, pattern: &Regex) -> bool {
+        self.lines().any(|line| pattern.is_match(line))
+    }
+}
+
+/// Whether two cards form a legal two-commander command zone
+/// (`Manavault.Catalog.CommanderRules.valid_pair?/2`): both have the Partner
+/// keyword with the same restricted label (plain Partner pairs only with
+/// plain Partner, "Partner—Survivors" only with another "Partner—Survivors"),
+/// each names the other with "Partner with", both have Friends forever, one
+/// is a Doctor's companion and the other a legendary Time Lord Doctor, or one
+/// chooses a Background and the other is a Background.
+///
+/// ManaVault accepted any card with "Time Lord Doctor" in its type line as
+/// the Doctor; a non-legendary one cannot be a commander, so this requires a
+/// legendary creature as [`commander_pairing`] does.
+#[must_use]
+pub fn valid_pair(a: &CommanderCard<'_>, b: &CommanderCard<'_>) -> bool {
+    let partner_keyword = match (a.partner_label(), b.partner_label()) {
+        (Some(label_a), Some(label_b)) => label_a == label_b,
+        _ => false,
+    };
+    partner_keyword
+        || (a.partner_with(b) && b.partner_with(a))
+        || (a.has_line(&FRIENDS_FOREVER_LINE) && b.has_line(&FRIENDS_FOREVER_LINE))
+        || (a.has_line(&DOCTORS_COMPANION_LINE) && is_doctor(b.type_line))
+        || (b.has_line(&DOCTORS_COMPANION_LINE) && is_doctor(a.type_line))
+        || (a.has_line(&CHOOSE_A_BACKGROUND_LINE) && is_background(b.type_line))
+        || (b.has_line(&CHOOSE_A_BACKGROUND_LINE) && is_background(a.type_line))
 }
 
 /// A Doctor's companion pairs with a legendary creature that is both a Time
@@ -149,12 +250,149 @@ mod tests {
     #[test]
     fn derives_commander_eligibility_without_treating_backgrounds_as_commanders() {
         assert!(can_be_commander("Legendary Creature — Human Wizard", ""));
+        assert!(can_be_commander("Legendary Artifact Creature — Golem", ""));
         assert!(!can_be_commander("Legendary Artifact", ""));
         assert!(can_be_commander(
             "Legendary Planeswalker — Test",
             "Test can be your commander."
         ));
+        assert!(can_be_commander(
+            "Legendary Enchantment",
+            "Ashaya's Enduring Bond can be your commander."
+        ));
         assert!(!can_be_commander("Legendary Enchantment — Background", ""));
+        assert!(!can_be_commander("Creature — Cat", ""));
+        assert!(!can_be_commander(
+            "Legendary Planeswalker — Jace",
+            "+1: Draw."
+        ));
+        assert!(!can_be_commander("Legendary Artifact — Equipment", ""));
+    }
+
+    /// `Manavault.Catalog.CommanderRulesTest`: CR 903.3 cases.
+    #[test]
+    fn accepts_legendary_vehicles_and_spacecraft_and_judges_the_front_face() {
+        assert!(can_be_commander("Legendary Artifact — Vehicle", ""));
+        assert!(can_be_commander("Legendary Artifact — Spacecraft", ""));
+        assert!(can_be_commander(
+            "Legendary Creature — God // Legendary Enchantment",
+            ""
+        ));
+        assert!(!can_be_commander(
+            "Legendary Enchantment — Saga // Legendary Creature — Snake",
+            ""
+        ));
+        assert!(!can_be_commander(
+            "Sorcery",
+            "Return your commander to your hand. Vehicles can crew."
+        ));
+        assert!(!can_be_commander("", ""));
+    }
+
+    fn card<'a>(name: &'a str, type_line: &'a str, oracle_text: &'a str) -> CommanderCard<'a> {
+        CommanderCard {
+            name,
+            type_line,
+            oracle_text,
+        }
+    }
+
+    #[test]
+    fn pairs_partner_keywords_only_with_matching_labels() {
+        let plain = card(
+            "A",
+            CREATURE,
+            "Partner (You can have two commanders if both have partner.)",
+        );
+        let plain_2 = card("B", CREATURE, "Flying\nPartner");
+        let survivors = card(
+            "C",
+            CREATURE,
+            "Partner—Survivors (You can have two commanders if both have this ability.)",
+        );
+        let survivors_2 = card("D", CREATURE, "Partner — survivors");
+        let partner_with = card("E", CREATURE, "Partner with B");
+        assert!(valid_pair(&plain, &plain_2));
+        assert!(valid_pair(&survivors, &survivors_2));
+        assert!(!valid_pair(&plain, &survivors));
+        assert!(!valid_pair(&plain, &partner_with));
+        assert!(!valid_pair(
+            &plain,
+            &card("F", CREATURE, "Partners in crime")
+        ));
+        assert!(!valid_pair(
+            &plain,
+            &card("G", CREATURE, "Whenever a Partner enters, draw a card.")
+        ));
+    }
+
+    #[test]
+    fn pairs_partner_with_only_when_both_name_each_other() {
+        let pir = card(
+            "Pir, Imaginative Rascal",
+            CREATURE,
+            "Partner with Toothy, Imaginary Friend (When this creature enters, target player may put Toothy into their hand from their library, then shuffle.)",
+        );
+        let toothy = card(
+            "Toothy, Imaginary Friend",
+            CREATURE,
+            "Partner with Pir, Imaginative Rascal\nTrample",
+        );
+        let impostor = card(
+            "Someone Else",
+            CREATURE,
+            "Partner with Pir, Imaginative Rascal",
+        );
+        assert!(valid_pair(&pir, &toothy));
+        assert!(!valid_pair(&pir, &impostor));
+        assert!(!valid_pair(&toothy, &impostor));
+        let mdfc = card(
+            "Toothy, Imaginary Friend // Toothy, Back",
+            CREATURE,
+            "Partner with Pir, Imaginative Rascal",
+        );
+        assert!(valid_pair(&pir, &mdfc));
+    }
+
+    #[test]
+    fn pairs_friends_forever_doctors_and_backgrounds() {
+        let friend = card("A", CREATURE, "Friends forever");
+        let friend_2 = card(
+            "B",
+            CREATURE,
+            "Partner—Friends forever (You can have two commanders if both have this ability.)",
+        );
+        assert!(valid_pair(&friend, &friend_2));
+        assert!(!valid_pair(&friend, &card("C", CREATURE, "Partner")));
+
+        let companion = card(
+            "D",
+            "Legendary Creature — Human Advisor",
+            "Doctor's companion (You can have two commanders if the other is the Doctor.)",
+        );
+        let doctor = card("E", "Legendary Creature — Time Lord Doctor", "Haste");
+        assert!(valid_pair(&companion, &doctor));
+        assert!(valid_pair(&doctor, &companion));
+        assert!(!valid_pair(
+            &companion,
+            &card("F", "Creature — Time Lord Doctor", "")
+        ));
+        assert!(!valid_pair(&doctor, &doctor));
+
+        let chooser = card(
+            "G",
+            CREATURE,
+            "Reach\nChoose a Background (You can have a Background as a second commander.)",
+        );
+        let background = card(
+            "H",
+            "Legendary Enchantment — Background",
+            "Commander creatures you own have haste.",
+        );
+        assert!(valid_pair(&chooser, &background));
+        assert!(valid_pair(&background, &chooser));
+        assert!(!valid_pair(&background, &background));
+        assert!(!valid_pair(&chooser, &friend));
     }
 
     #[test]
