@@ -1,0 +1,58 @@
+[package]
+name = "lotus"
+description = "Magic: The Gathering domain types, Scryfall catalog parsing, and decklist sources shared by ManaVault and the-gathering."
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MPL-2.0"
+repository = "https://github.com/cfbender/lotus"
+publish = false
+
+[features]
+default = []
+# `sqlx::Type` impls so the domain types can be stored in SQLite columns.
+sqlx = ["dep:sqlx"]
+# HTTP clients for Scryfall and the decklist sources.
+http = ["dep:reqwest", "dep:tokio", "dep:futures-util"]
+
+[dependencies]
+flate2 = "1"
+percent-encoding = "2"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+time = { version = "0.3", features = ["parsing", "formatting", "macros", "serde"] }
+unicode-normalization = "0.1"
+url = "2"
+
+futures-util = { version = "0.3", optional = true, default-features = false }
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls", "json", "stream"] }
+sqlx = { version = "0.9", optional = true, default-features = false, features = ["derive", "sqlite", "time"] }
+tokio = { version = "1", optional = true, features = ["fs", "io-util", "net", "time"] }
+
+[dev-dependencies]
+sqlx = { version = "0.9", default-features = false, features = ["derive", "macros", "runtime-tokio", "sqlite-bundled", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"
+
+# Guardrails for generated code: the compiler and clippy reject the usual escape
+# hatches, so a change either type-checks against the domain model or fails CI.
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+as_conversions = "deny"
+dbg_macro = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+missing_errors_doc = "allow"
+# `assert!(x.is_empty())` reads better than `assert_eq!(x, [] as [T; 0])`.
+assert_is_empty = "allow"
+module_name_repetitions = "allow"

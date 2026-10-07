@@ -1,0 +1,50 @@
+{
+  "id": 24907541,
+  "name": "I am a public servant",
+  "owner": { "username": "Will3545" },
+  "categories": [
+    { "name": "Commander", "includedInDeck": true, "isPremier": true },
+    { "name": "Land", "includedInDeck": true, "isPremier": false },
+    { "name": "Mainboard", "includedInDeck": true, "isPremier": false },
+    { "name": "Maybeboard", "includedInDeck": false, "isPremier": false }
+  ],
+  "cards": [
+    {
+      "quantity": 1,
+      "categories": ["Commander"],
+      "card": {
+        "uid": "0c4b3e5a-8f5d-4a32-9f6e-2b1d7c9a4e01",
+        "oracleCard": { "name": "Noble Heritage", "colorIdentity": ["White"] }
+      }
+    },
+    {
+      "quantity": 1,
+      "categories": ["Commander"],
+      "card": {
+        "uid": "0c4b3e5a-8f5d-4a32-9f6e-2b1d7c9a4e02",
+        "oracleCard": { "name": "Wilson, Refined Grizzly", "colorIdentity": ["Green"] }
+      }
+    },
+    {
+      "quantity": 38,
+      "categories": ["Land"],
+      "card": {
+        "uid": "0c4b3e5a-8f5d-4a32-9f6e-2b1d7c9a4e03",
+        "oracleCard": { "name": "Forest", "colorIdentity": [] }
+      }
+    },
+    {
+      "quantity": 60,
+      "categories": ["Mainboard"],
+      "card": { "oracleCard": { "name": "Other cards", "colorIdentity": [] } }
+    },
+    {
+      "quantity": 1,
+      "categories": ["Maybeboard", "Ramp"],
+      "card": {
+        "uid": "0c4b3e5a-8f5d-4a32-9f6e-2b1d7c9a4e05",
+        "oracleCard": { "name": "Cultivate", "colorIdentity": ["Green"] }
+      }
+    }
+  ]
+}

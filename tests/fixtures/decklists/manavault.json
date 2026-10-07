@@ -1,0 +1,41 @@
+{
+  "data": {
+    "deck": {
+      "name": "Shared Deck",
+      "cardCount": 100,
+      "commanderColorIdentity": ["W", "U"],
+      "deckCards": {
+        "pageInfo": { "endCursor": "YXJyYXljb25uZWN0aW9uOjI=", "hasNextPage": false },
+        "edges": [
+          {
+            "node": {
+              "quantity": 1,
+              "zone": "commander",
+              "card": { "name": "Shorikai, Genesis Engine" },
+              "preferredPrinting": { "scryfallId": "b3a0e8d4-1f2c-4c4e-9a55-6f1d2e3c4b01" },
+              "fallbackPrinting": { "scryfallId": "b3a0e8d4-1f2c-4c4e-9a55-6f1d2e3c4b99" }
+            }
+          },
+          {
+            "node": {
+              "quantity": 1,
+              "zone": "mainboard",
+              "card": { "name": "Sol Ring" },
+              "preferredPrinting": null,
+              "fallbackPrinting": { "scryfallId": "b3a0e8d4-1f2c-4c4e-9a55-6f1d2e3c4b02" }
+            }
+          },
+          {
+            "node": {
+              "quantity": 1,
+              "zone": "considering",
+              "card": { "name": "Rhystic Study" },
+              "preferredPrinting": null,
+              "fallbackPrinting": null
+            }
+          }
+        ]
+      }
+    }
+  }
+}

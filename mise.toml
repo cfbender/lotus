@@ -1,0 +1,17 @@
+[tools]
+rust = { version = "1.99.0", components = "clippy,rustfmt" }
+
+[tasks.check]
+description = "Format-check, lint, and test with every feature combination."
+run = [
+  "cargo fmt --check",
+  "cargo clippy --all-targets --locked -- -D warnings",
+  "cargo clippy --all-targets --all-features --locked -- -D warnings",
+  "cargo test --locked",
+  "cargo test --all-features --locked",
+  "RUSTDOCFLAGS='-D warnings' cargo doc --all-features --no-deps --locked",
+]
+
+[tasks.test]
+description = "Run the test suite with every feature enabled."
+run = "cargo test --all-features"
